@@ -15,16 +15,18 @@ t_end = 300;                % 运行时间 300秒
 
 % 动态调整的基站和车辆数量 (满足后续动态调整需求)
 Vehicle_num = 4;            
-Anchor_num = 2;             
+Anchor_num = 4;             
 
 % 基站 3D 位置 (x, y, z) - 沿 20m x 40m 对角线放置于平地
 anchors_pool = [ 0,  0, 0;
+                20,  0,  0;
+                0 , 40, 0;
                 20, 40, 0]; 
 % 截取指定数量的基站
 anchors = anchors_pool(1:Anchor_num, :);
 
 % 存储文件名与路径 (保存于当前 Data 文件夹下)
-save_dir = './'; 
+save_dir = 'E:\SE3_MLKF\Data'; 
 trajectories_mat_name = sprintf('Trj_data_Veh%d_Anc%d_3D.mat', Vehicle_num, Anchor_num);
 
 % 初始化总体轨迹结构体
@@ -257,12 +259,12 @@ legend([h_anchor, h_traj], 'Location', 'northeastoutside');
 hold off;
 
 %% 6. 数据导出
-% if ~exist(save_dir, 'dir')
-%     mkdir(save_dir);
-% end
-% save_path = fullfile(save_dir, trajectories_mat_name);
-% save(save_path, 'trajectories', 'anchors', 'IMU_noise_params', 'UWB_noise_params', 'Vehicle_num', 'Anchor_num');
-% fprintf('仿真数据生成成功，已保存至：%s\n', save_path);
+if ~exist(save_dir, 'dir')
+    mkdir(save_dir);
+end
+save_path = fullfile(save_dir, trajectories_mat_name);
+save(save_path, 'trajectories', 'anchors', 'IMU_noise_params', 'UWB_noise_params', 'Vehicle_num', 'Anchor_num');
+fprintf('仿真数据生成成功，已保存至：%s\n', save_path);
 
 %% 辅助函数组
 
