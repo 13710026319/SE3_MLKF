@@ -6,7 +6,6 @@ classdef CMLKF < manifold_predict
         end
         
         function update(obj, anchors, anc_meas, rel_meas, sigma_anc, sigma_rel)
-            % CMLKF 集中式最大似然投影更新步 (已应用双重 LM 阻尼正则化，解决不可观测导致的 NaN 问题)
             
             N = obj.Vehicle_num;
             
@@ -19,7 +18,7 @@ classdef CMLKF < manifold_predict
                     end
                 end
             end
-            
+
             active_rel = []; % [veh_n, veh_m, distance_val]
             for n = 1:N
                 for m = (n+1):N
@@ -28,12 +27,13 @@ classdef CMLKF < manifold_predict
                     end
                 end
             end
-            
+
             % 如果当前时刻无任何有效观测，直接返回
             if isempty(active_anchors) && isempty(active_rel)
                 return;
             end
             
+
             % 2. 构造联合测量向量 y_meas 与 协方差逆矩阵 R_inv
             y_meas = [active_anchors(:, 3); active_rel(:, 3)];
             M_anc = size(active_anchors, 1);

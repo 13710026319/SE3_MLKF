@@ -76,7 +76,7 @@ for k = 2:N_steps
     
     % A. 预测更新步 (共用父类 manifold_predict 方法) [7]
     filter_esekf.propagate(imu_acc, imu_gyro, dt_imu);
-    filter_cukf.propagate(imu_acc, imu_gyro, dt_imu);   % <--- 已补充 CUKF 预测
+    filter_cukf.propagate(imu_acc, imu_gyro, dt_imu);   
     filter_cmlkf.propagate(imu_acc, imu_gyro, dt_imu);
     
     % B. UWB 10Hz 观测纠正步
@@ -93,14 +93,14 @@ for k = 2:N_steps
         
         % 三种形式卡尔曼滤波更新
         filter_esekf.update(anchors, anc_meas, rel_meas, UWB_noise_params.sigma_anc, UWB_noise_params.sigma_rel);
-        filter_cukf.update(anchors, anc_meas, rel_meas, UWB_noise_params.sigma_anc, UWB_noise_params.sigma_rel);    % <--- 已补充 CUKF 更新
+        filter_cukf.update(anchors, anc_meas, rel_meas, UWB_noise_params.sigma_anc, UWB_noise_params.sigma_rel);   
         filter_cmlkf.update(anchors, anc_meas, rel_meas, UWB_noise_params.sigma_anc, UWB_noise_params.sigma_rel);
     end
     
     % C. 结果记录
     for n = 1:Vehicle_num
         pos_est_esekf{n}(k, :) = filter_esekf.states(n).X(1:3, 5)';
-        pos_est_cukf{n}(k, :)  = filter_cukf.states(n).X(1:3, 5)';     % <--- 已补充 CUKF 状态记录
+        pos_est_cukf{n}(k, :)  = filter_cukf.states(n).X(1:3, 5)';     
         pos_est_cmlkf{n}(k, :) = filter_cmlkf.states(n).X(1:3, 5)';
     end
 end
@@ -114,7 +114,7 @@ for n = 1:Vehicle_num
 end
 % 分别计算误差
 [errors_esekf, rmse_esekf] = calculate_position_errors(pos_est_esekf, pos_true);
-[errors_cukf, rmse_cukf]   = calculate_position_errors(pos_est_cukf, pos_true);     % <--- 已补充 CUKF 误差计算
+[errors_cukf, rmse_cukf]   = calculate_position_errors(pos_est_cukf, pos_true);    
 [errors_cmlkf, rmse_cmlkf] = calculate_position_errors(pos_est_cmlkf, pos_true);
 % 组装表格数据 [2]（行数扩充为 Vehicle_num * 3）
 RowNames = cell(Vehicle_num * 3, 1);
