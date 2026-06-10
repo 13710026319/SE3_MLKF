@@ -93,6 +93,65 @@ classdef CMLKF < handle
             obj.P = 0.5 * (obj.P + obj.P'); % 数值对称性保护
         end
         
+
+        function update_imu_only(obj, imu_acc, imu_gyro, sig_acc, sig_gyro)
+            % High-Frequency IMU-Only Update (新文档 3.2.4 节新增 EKF 更新)
+            % 用于高频非UWB时刻，仅利用加速度计和陀螺仪测量进行状态修正 [1]
+            
+            I = obj.Vehicle_num;
+            
+            % 1. 构造联合测量残差 r_t 与 联合噪声协方差 R_IMU
+            r_t = zeros(6*I, 1);
+            H_IMU = zeros(6*I, 15*I);
+            R_IMU = zeros(6*I, 6*I);
+            
+            for i = 1:I
+                R_i = obj.states(i).R;
+                a_i = obj.states(i).a;
+                omega_i = obj.states(i).omega;
+                
+                acc_tilde = imu_acc(i, :)';
+                gyro_tilde = imu_gyro(i, :)';
+                
+                % 计算单车 IMU 观测残差 (新文档 1.2 节测量方程) [1]
+                r_a = acc_tilde - R_i' * (a_i - obj.g_vec);
+                r_omega = gyro_tilde - omega_i;
+                r_t((i-1)*6 + (1:6)) = [r_a; r_omega];
+                
+                % 2. 构造单车误差状态雅可比 H_IMU_t^i (6x15矩阵) [5]
+                % 误差排布: [\delta p (1:3); \delta v (4:6); \delta a (7:9); \delta \phi (10:12); \delta \omega (13:15)] [2]
+                H_i = zeros(6, 15);
+                % 对应加速度测量方程对各误差状态求导 [5]
+                H_i(1:3, 7:9)   = R_i';                                  % wrt \delta a
+                H_i(1:3, 10:12) = skew(R_i' * (a_i - obj.g_vec));        % wrt \delta \phi
+                % 对应角速度测量方程对各误差状态求导 [5]
+                H_i(4:6, 13:15) = eye(3);                                % wrt \delta \omega
+                
+                H_IMU((i-1)*6 + (1:6), (i-1)*15 + (1:15)) = H_i;
+                
+                % 噪声协方差 R_IMU
+                R_IMU((i-1)*6 + (1:6), (i-1)*6 + (1:6)) = diag([sig_acc^2 * ones(3, 1); sig_gyro^2 * ones(3, 1)]);
+            end
+            
+            % 3. 标准卡尔曼形式更新 (无需非线性迭代优化，通过先验协方差矩阵 obj.P 进行正则化保护) [7]
+            S = H_IMU * obj.P * H_IMU' + R_IMU;
+            K = (obj.P * H_IMU') / S;
+            
+            % 计算 15I 维状态纠正偏差 Delta_theta
+            dtheta = K * r_t;
+            
+            % 更新系统状态协方差 P (对称性保护)
+            obj.P = (eye(15*I) - K * H_IMU) * obj.P;
+            obj.P = 0.5 * (obj.P + obj.P');
+            
+            % 4. 标称状态 15维 流形修正 [7]
+            for i = 1:I
+                dx_i = dtheta((i-1)*15 + (1:15));
+                obj.states(i) = manifold_add(obj.states(i), dx_i);
+            end
+        end
+
+
         function update(obj, imu_acc, imu_gyro, anchors, uwb_anc, uwb_rel, ...
                         sig_acc, sig_gyro, sig_s, sig_z)
             % 3.2 & 3.3 集中式观测更新步骤 [4, 6]
@@ -293,9 +352,8 @@ classdef CMLKF < handle
             % 提取似然等效信息矩阵 (文档 Eq 44) [6]
             inv_Xi_t = H_jac_ML' * inv_R * H_jac_ML;
             
-            % --- 3. 统计提取与空间雅可比融合 (文档 3.2.4 & 3.3 节) --- [6]
+            % 统计提取与空间雅可比融合 (文档 3.2.4 & 3.3 节) --- [6]
             mu_t = zeros(12*I, 1);
-            sc_0 = zeros(12*I, 1);
             J_t = zeros(12*I, 12*I);
             
             for i = 1:I
@@ -311,14 +369,8 @@ classdef CMLKF < handle
                 mu_t((i-1)*12 + (7:9))   = so3_log(R_hat' * chi_L(i).R);
                 mu_t((i-1)*12 + (10:12)) = chi_L(i).omega - omega_hat;
                 
-                % B. 计算该车在测量流形上的先验状态偏差 s_c(0) [6]
-                sc_0((i-1)*12 + (1:3))   = p_hat - chi_L(i).p;
-                sc_0((i-1)*12 + (4:6))   = a_hat - chi_L(i).a;
-                sc_0((i-1)*12 + (7:9))   = so3_log(chi_L(i).R' * R_hat);
-                sc_0((i-1)*12 + (10:12)) = omega_hat - chi_L(i).omega;
-                
-                % C. 计算该车对应的逆右雅可比分量 Jr_inv (文档 Eq 50-54) [6, 7]
-                phi_e_i = sc_0((i-1)*12 + (7:9)); % 旋转偏差
+                % B. 计算该车对应的逆右雅可比分量 Jr_inv (使用 -mu_t 代替 sc_0) [6, 7]
+                phi_e_i = -mu_t((i-1)*12 + (7:9)); % 旋转偏差，严格等于 so3_log(chi_L(i).R' * R_hat)
                 Jr_inv_i = so3_inv_right_jacobian(phi_e_i);
                 
                 % 构造单车空间雅可比变换块 J_t^i (文档 Eq 53) [7]
@@ -332,9 +384,9 @@ classdef CMLKF < handle
             % 计算先验切平面的 mapped 测量信息矩阵 (文档 Eq 57) [7]
             inv_Xi_t_prior = J_t' * inv_Xi_t * J_t;
             
-            % 计算先验切平面 mapped 信息向量 (文档 Eq 58) [7]
-            eta_t_prior = J_t' * inv_Xi_t * (mu_t - sc_0);
-            
+            % 计算先验切平面 mapped 信息向量 (已修正 2 倍过大 Bug) [7]
+            eta_t_prior = J_t' * inv_Xi_t * mu_t;
+
             % --- 4. 误差切空间降维选择与融合更新 (文档 Eq 59-62) --- [7]
             % 构造切平面状态选择矩阵 \pi (12I x 15I) 排除速度 [2, 7]
             pi_mat = zeros(12*I, 15*I);
