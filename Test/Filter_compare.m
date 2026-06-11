@@ -46,6 +46,7 @@ for n = 1:Vehicle_num
 end
 
 %% 3. 初始化两大滤波器状态与协方差矩阵 (严格对齐物理假设)
+
 % A. 为 15 维算法组 (CMLKF) 初始化标称状态与协方差 [1, 2, 3]
 init_states_15d = struct('p', {}, 'v', {}, 'a', {}, 'R', {}, 'omega', {});
 for n = 1:Vehicle_num
@@ -59,19 +60,21 @@ for n = 1:Vehicle_num
 end
 
 P_n_init_15d = diag([ ...
-    (0.01)^2 * ones(1, 3), ...     % 位置不确定度
-    (0.01)^2 * ones(1, 3), ...     % 速度不确定度
-    (0.05)^2 * ones(1, 3), ...     % 加速度不确定度
-    (1*pi/180)^2 * ones(1, 3), ... % 姿态不确定度
-    (0.005)^2 * ones(1, 3) ...     % 角速度不确定度
+(0.02)^2 * ones(1, 3), ... % 位置不确定度
+(0.02)^2 * ones(1, 3), ... % 速度不确定度
+(0.2)^2 * ones(1, 3), ... % 加速度不确定度
+(2*pi/180)^2 * ones(1, 3), ... % 姿态不确定度
+(0.02)^2 * ones(1, 3) ... % 角速度不确定度
 ]);
+
 init_P_15d = kron(eye(Vehicle_num), P_n_init_15d);
 
-Q_sigmas_15d.sig_wp      = 0.001;  
-Q_sigmas_15d.sig_wv      = 0.005;  
-Q_sigmas_15d.sig_wa      = 0.05;   
-Q_sigmas_15d.sig_wR      = 0.001;  
-Q_sigmas_15d.sig_womega = 0.005;  
+% --- 核心修改2：降低 az 的过程噪声 ---
+Q_sigmas_15d.sig_wp      = 0.005;  
+Q_sigmas_15d.sig_wv      = 0.015;  
+Q_sigmas_15d.sig_wa      = 0.025; 
+Q_sigmas_15d.sig_wR      = 0.005;  
+Q_sigmas_15d.sig_womega = 0.0025;
 
 % B. 为 9 维经典算法组 (ESKF) 初始化标称状态与协方差 [1.1.5]
 init_states_9d = struct('p', {}, 'v', {}, 'R', {});
@@ -93,6 +96,7 @@ init_P_9d = kron(eye(Vehicle_num), P_n_init_9d);
 % C. 实例化两个滤波器类
 filter_cmlkf = CMLKF(init_states_15d, init_P_15d, Q_sigmas_15d);
 filter_eskf  = ESKF(init_states_9d, init_P_9d, IMU_noise_params);
+
 
 %% 4. 执行多滤波器并行仿真循环
 pos_est_cmlkf = cell(Vehicle_num, 1);
@@ -148,8 +152,7 @@ for k = 2:N_steps
         filter_eskf.update(anchors, anc_meas, rel_meas, ...
                            UWB_noise_params.sigma_anc, UWB_noise_params.sigma_rel);
     else
-        % --- 高频 IMU-only 更新周期 (其余 90Hz 的 IMU 时间步) ---
-        % 根据新文档说明，只有 CMLKF 使用新增的 6I 维 IMU 观测方程实施高频估计纠正
+        
         filter_cmlkf.update_imu_only(imu_acc, imu_gyro, ...
                                      IMU_noise_params.sigma_na, IMU_noise_params.sigma_nw);
     end
