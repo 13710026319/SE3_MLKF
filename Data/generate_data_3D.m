@@ -16,14 +16,14 @@ Anchor_num = 4;             % 基站数量
 
 % 【黄金布局优化】：基站高度在 0~8m 范围内实现非对称立体最大化错落
 % 打破任何局部的共面奇异，使得 GDOP 在 3D 空间内各向同性
-anchors = [ 0,  0, 0.5;     % 角落 1：极低位
+anchors = [ 0,  0, 0;     % 角落 1：极低位
            20,  0, 7.5;     % 角落 2：极高位
-           20, 40, 2.5;     % 角落 3：中低位
-            0, 40, 6.0];    % 角落 4：中高位
+           20, 40, 0;     % 角落 3：中低位
+            0, 40, 7.5];    % 角落 4：中高位
 
 % 保存路径
 save_dir = 'E:\SE3_MLKF\Data'; 
-trajectories_mat_name = sprintf('Trj_data_Veh%d_Anc%d_3D_2.mat', Vehicle_num, Anchor_num);
+trajectories_mat_name = sprintf('Trj_data_Veh%d_Anc%d_3D_1.mat', Vehicle_num, Anchor_num);
 
 % 噪声参数
 IMU_noise_params.sigma_na = 0.05;      
@@ -37,10 +37,10 @@ UWB_noise_params.sigma_rel = 0.07;
 % 初始状态规划：[X, Y, Z, 初始速率, 初始航向角]
 % 高度均限制在 2m ~ 7m 范围内，各自占据不同的起始高度层
 init_configs = [
-    2,   4,  2.5,  0.11,  0;      % V1: 低层偏南，朝东，后续北转并持续爬升
-   18,   6,  6.5,  0.11,  pi;     % V2: 高层偏南，朝西，后续北转并持续下降
-    3,  36,  4.5,  0.11,  0;      % V3: 中层偏北，朝东，后续南转并持续爬升
-   17,  34,  5.5,  0.07,  pi;     % V4: 中高层偏北，朝西，后续南转并持续下降
+    3,   5,  2.5,  0.10,  0;      % V1: 低空层(2.5m)， 偏南，朝东，后续北转
+   17,   3,  6.5,  0.10,  pi;     % V2: 高空层(6.5m)， 偏南，朝西，后续北转
+    3,  39,  3.8,  0.10,  0;      % V3: 中低层(3.8m)， 偏北，朝东，后续南转
+   18,  35,  5.2,  0.10,  pi;     % V4: 中高层(5.2m)， 偏北，朝西，后续南转
 ];
 
 trajectories = struct();
@@ -57,71 +57,65 @@ for n = 1:Vehicle_num
     P_true(1, :) = cfg(1:3);
     v_mag = cfg(4);
     th_curr = cfg(5);
-    % 结合初始三维速度（含微弱垂直速度以开启斜线运动）
     V_true(1, :) = [v_mag * cos(th_curr), v_mag * sin(th_curr), 0];
     Theta_true(1) = th_curr;
     
-    % 计算转弯过渡段的时间窗（保证每架无人机在 300s 内只在中间区域平滑转弯一次）
-    t_turn_start = 120 + (n-1)*15; % 错开转弯时间，避免群内瞬时扰动重叠
+    % 计算转弯过渡段的时间窗
+    t_turn_start = 120 + (n-1)*15; % 错开转弯时间：V1:120s, V2:135s, V3:150s, V4:165s
     t_turn_end = t_turn_start + 3;
     
     for k = 2:N_steps
         t = (k-1) * dt_imu;
-        a_curr = [0; 0; 0];
+        a_curr = [0; 0; 0]; % 默认 Z 轴加速度全程为 0
         th_curr = Theta_true(k-1);
         
-        % 根据不同车辆进行平滑的 3D 加速度与单次转弯规划
         switch n
-            case 1  % V1: 前期东行缓慢爬升 -> 原地左转90度(朝北) -> 继续北行并加速爬升
+            case 1  % V1: 高度恒定 2.5m。东行巡航 -> 120s时原地左转 -> 向北巡航
                 if t < t_turn_start
-                    th_curr = 0;
-                    a_curr = [0; 0; 0.008]; % 缓慢向上斜飞
+                    th_curr = 0; a_curr = [0; 0; 0];
                 elseif t >= t_turn_start && t <= t_turn_end
-                    a_curr = [0; 0; 0];    % 旋转期间水平面速度置零，保持高度不变
-                    V_true(k-1, 1:2) = 0;
+                    a_curr = [0; 0; 0]; V_true(k-1, 1:2) = 0; % 原地转弯，水平速度置零
                     th_curr = 0 + (pi/2)/3 * (t - t_turn_start); % 3秒平滑左转90度(朝北)
+                elseif t > t_turn_end && t <= t_turn_end + 10
+                    th_curr = pi/2; a_curr = [0; 0.01; 0]; % 转弯后水平加速 10s 恢复航速
                 else
-                    th_curr = pi/2;
-                    a_curr = [0; 0.001; 0.006]; % 朝北前行，持续平滑爬升
+                    th_curr = pi/2; a_curr = [0; 0; 0];    % 匀速北行
                 end
                 
-            case 2  % V2: 前期西行缓慢下降 -> 原地右转90度(朝北) -> 继续北行并加速下降
+            case 2  % V2: 高度恒定 6.5m。西行巡航 -> 135s时原地右转 -> 向北巡航
                 if t < t_turn_start
-                    th_curr = pi;
-                    a_curr = [0; 0; -0.008]; % 缓慢向下斜飞
+                    th_curr = pi; a_curr = [0; 0; 0];
                 elseif t >= t_turn_start && t <= t_turn_end
-                    a_curr = [0; 0; 0];
-                    V_true(k-1, 1:2) = 0;
+                    a_curr = [0; 0; 0]; V_true(k-1, 1:2) = 0;
                     th_curr = pi - (pi/2)/3 * (t - t_turn_start); % 3秒平滑右转90度(朝北)
+                elseif t > t_turn_end && t <= t_turn_end + 10
+                    th_curr = pi/2; a_curr = [0; 0.01; 0]; % 转弯后水平加速 10s
                 else
-                    th_curr = pi/2;
-                    a_curr = [0; 0.001; -0.006]; % 朝北前行，持续平滑下降
+                    th_curr = pi/2; a_curr = [0; 0; 0];
                 end
                 
-            case 3  % V3: 前期东行缓慢爬升 -> 原地右转90度(朝南) -> 继续南行并加速爬升
+            case 3  % V3: 高度恒定 3.8m。东行巡航 -> 150s时原地右转 -> 向南巡航
                 if t < t_turn_start
-                    th_curr = 0;
-                    a_curr = [0; 0; 0.005]; 
+                    th_curr = 0; a_curr = [0; 0; 0];
                 elseif t >= t_turn_start && t <= t_turn_end
-                    a_curr = [0; 0; 0];
-                    V_true(k-1, 1:2) = 0;
+                    a_curr = [0; 0; 0]; V_true(k-1, 1:2) = 0;
                     th_curr = 0 - (pi/2)/3 * (t - t_turn_start); % 3秒平滑右转90度(朝南)
+                elseif t > t_turn_end && t <= t_turn_end + 10
+                    th_curr = -pi/2; a_curr = [0; -0.01; 0]; % 转弯后水平加速 10s
                 else
-                    th_curr = -pi/2;
-                    a_curr = [0; -0.001; 0.004]; % 朝南前行，持续爬升
+                    th_curr = -pi/2; a_curr = [0; 0; 0];
                 end
                 
-            case 4  % V4: 前期西行缓慢下降 -> 原地左转90度(朝南) -> 继续南行并加速下降
+            case 4  % V4: 高度恒定 5.2m。西行巡航 -> 165s时原地左转 -> 向南巡航
                 if t < t_turn_start
-                    th_curr = pi;
-                    a_curr = [0; 0; -0.006];
+                    th_curr = pi; a_curr = [0; 0; 0];
                 elseif t >= t_turn_start && t <= t_turn_end
-                    a_curr = [0; 0; 0];
-                    V_true(k-1, 1:2) = 0;
+                    a_curr = [0; 0; 0]; V_true(k-1, 1:2) = 0;
                     th_curr = pi + (pi/2)/3 * (t - t_turn_start); % 3秒平滑左转90度(朝南)
+                elseif t > t_turn_end && t <= t_turn_end + 10
+                    th_curr = 3*pi/2; a_curr = [0; -0.01; 0]; % 转弯后水平加速 10s
                 else
-                    th_curr = 3*pi/2;
-                    a_curr = [0; -0.001; -0.004]; % 朝南前行，持续下降
+                    th_curr = 3*pi/2; a_curr = [0; 0; 0];
                 end
         end
         
@@ -129,17 +123,12 @@ for n = 1:Vehicle_num
         A_true(k-1, :) = a_curr';
         V_true(k, :)   = V_true(k-1, :) + A_true(k-1, :) * dt_imu;
         P_true(k, :)   = P_true(k-1, :) + V_true(k-1, :) * dt_imu + 0.5 * A_true(k-1, :) * dt_imu^2;
-        
-        % 边界安全性硬约束：确保由于持续加速度导致的高度飞行绝不溢出 [2m, 7m] 范围
-        if P_true(k, 3) < 2.1
-            P_true(k, 3) = 2.1; V_true(k, 3) = 0;
-        elseif P_true(k, 3) > 6.9
-            P_true(k, 3) = 6.9; V_true(k, 3) = 0;
-        end
         Theta_true(k)  = th_curr;
     end
-    A_true(end, :) = [0, 0, 0]; 
-    
+    A_true(end, :) = [0, 0, 0];
+
+
+
     % 保存真值分量
     trajectories.(v_name).Time_true = (0:dt_imu:t_end)';
     trajectories.(v_name).X_true = P_true(:, 1);
