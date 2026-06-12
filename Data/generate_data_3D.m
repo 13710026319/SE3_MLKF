@@ -26,12 +26,12 @@ save_dir = 'E:\SE3_MLKF\Data';
 trajectories_mat_name = sprintf('Trj_data_Veh%d_Anc%d_3D_1.mat', Vehicle_num, Anchor_num);
    
 % 噪声参数
-IMU_noise_params.sigma_na = 0.01;      
-IMU_noise_params.sigma_nw = 0.001;     
+IMU_noise_params.sigma_na = 0.03;      
+IMU_noise_params.sigma_nw = 0.003;     
 IMU_noise_params.sigma_ba = 0.001;     
 IMU_noise_params.sigma_bw = 0.0001;    
-UWB_noise_params.sigma_anc = 0.2;     
-UWB_noise_params.sigma_rel = 0.2;  
+UWB_noise_params.sigma_anc = 0.3;     
+UWB_noise_params.sigma_rel = 0.3;  
 
 %% 2. 独立车辆动力学规划 (3秒平滑原地转弯 + 持续三维斜线飞行)
 % 初始状态规划：[X, Y, Z, 初始速率, 初始航向角]
