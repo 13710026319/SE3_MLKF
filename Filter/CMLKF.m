@@ -293,7 +293,6 @@ classdef CMLKF < handle
         
         function update_imu_only(obj, imu_acc, imu_gyro, sig_acc, sig_gyro)
             % 【全新重构】：利用 MLKF 非线性投影结构在 9维 IMU测量空间上进行高频优化更新 [4]
-            % 解决以往仅在 EKF 线性化下 IMU 高频信息对状态约束微弱、容易漂移的痛点
             
             I = obj.Vehicle_num;
             M = 6*I; % IMU测量的联合维度 (3D加速度 + 3D角速度) [1]
