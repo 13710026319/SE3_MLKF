@@ -1,35 +1,33 @@
-classdef ESKF < handle
+classdef EKF < handle
+    % 离散噪声下的EKF
     properties
         Vehicle_num         % 车辆数量 I
-        states              % 结构体数组：.p (3x1), .v (3x1), .R (3x3) (加速度和角速度退化为输入)
+        states              % 结构体数组：.p (3x1), .v (3x1), .R (3x3) (IMU数据作为系统输入)
         P                   % 联合协方差矩阵 [9I x 9I]
-        Q_joint             % 联合过程噪声矩阵 [9I x 9I] (由IMU白噪声驱动)
+        Q_joint             % 联合过程噪声矩阵 [9I x 9I] (与 CMLKF 高度一致的离散单步噪声)
         g_vec               % 3D重力加速度常数 [1]
     end
     
     methods
-        function obj = ESKF(init_states_struct, init_P, IMU_noise_params)
-            % ESKF 构造函数 (符合导师要求：将 IMU 视作输入，状态缩减至 9 维)
-            %   init_states_struct: 初始状态结构体 (.p, .v, .R)
-            %   init_P: 初始联合协方差 [9I x 9I]
-            %   IMU_noise_params: 包含输入噪声 sigma_na, sigma_nw 的结构体
-            
+        function obj = EKF(init_states_struct, init_P)
+            % EKF 构造函数 (9 维经典状态结构，采用与 CMLKF 一致的离散时间系统噪声)
             obj.Vehicle_num = length(init_states_struct);
             obj.states = init_states_struct;
             obj.P = init_P;
             obj.g_vec = [0; 0; -9.81]; % 3D 重力矢量 [1]
             
-            % 构建由输入白噪声驱动的离散系统过程噪声 Q_joint (9I x 9I)
+            % 构建离散系统过程噪声 Q_joint (9I x 9I)
             I = obj.Vehicle_num;
             obj.Q_joint = zeros(9*I, 9*I);
             
-            % 经典输入噪声分配：位置块为0，速度块由加速度噪声驱动，姿态块由陀螺仪噪声驱动
+            % 设置离散单步标准差 (对应 CMLKF 的 sig_wp=0, sig_wv=0.001, sig_wR=0.0001) [1]
             Q_single = diag([ ...
-                1e-10 * ones(1, 3), ...                % 位置块过程噪声极小
-                IMU_noise_params.sigma_na^2 * ones(1, 3), ... % 速度块过程噪声
-                IMU_noise_params.sigma_nw^2 * ones(1, 3)  ... % 姿态块过程噪声
+                1e-10 * ones(1, 3), ...     % 位置块过程噪声 (极小)
+                (0.005)^2 * ones(1, 3), ... % 速度块过程噪声 (1e-6)
+                (0.0005)^2 * ones(1, 3) ... % 姿态块过程噪声 (1e-8)
             ]);
             
+
             for idx = 1:I
                 row_idx = (idx-1)*9 + (1:9);
                 obj.Q_joint(row_idx, row_idx) = Q_single;
@@ -37,11 +35,7 @@ classdef ESKF < handle
         end
         
         function propagate(obj, imu_acc, imu_gyro, dt)
-            % 标称状态与协方差时间传播 (符合导师要求：IMU 数据作为系统输入)
-            % imu_acc:  [I x 3] 预校正后的加速度计输入 \tilde{a}_t [1]
-            % imu_gyro: [I x 3] 预校正后的陀螺仪输入 \tilde{\omega}_t [1]
-            % dt: 采样周期 \tau [1]
-            
+            % 标称状态与协方差时间传播 (符合导师要求：IMU数据作为系统输入驱动名义更新) [1.2.9]
             I = obj.Vehicle_num;
             A_joint = zeros(9*I, 9*I);
             
@@ -53,7 +47,7 @@ classdef ESKF < handle
                 acc_tilde = imu_acc(i, :)';
                 gyro_tilde = imu_gyro(i, :)';
                 
-                % 1. 经典名义状态积分传播 (IMU作为输入驱动位置、速度、姿态前向更新)
+                % 1. 标称状态积分传播 [1.2.9]
                 acc_nav = R_t * acc_tilde + obj.g_vec; % 转换至导航系并叠加重力 [1]
                 p_next = p_t + dt * v_t + 0.5 * dt^2 * acc_nav;
                 v_next = v_t + dt * acc_nav;
@@ -73,24 +67,18 @@ classdef ESKF < handle
                 A_joint(row_idx, row_idx) = A_i;
             end
             
-            % 3. 联合协方差传播 (严格包含连续时间噪声 Q) [4]
-            obj.P = A_joint * obj.P * A_joint' + obj.Q_joint * dt;
+            % 3. 联合协方差传播 (对齐离散噪声更新，不乘 dt) [4]
+            obj.P = A_joint * obj.P * A_joint' + obj.Q_joint;
             obj.P = 0.5 * (obj.P + obj.P'); % 数值正定保护
         end
         
         function update(obj, anchors, uwb_anc, uwb_rel, sig_s, sig_z)
-            % 经典紧耦合 ESKF 观测更新 (仅利用 UWB 测距修正惯导累积误差，IMU 不参与更新)
-            % 输入:
-            %   anchors: [K x 3] 基站位置 [1]
-            %   uwb_anc: [I x K] 基站测距测量 (NaN表示无) [1]
-            %   uwb_rel: [I x I] 车间相对测距测量 (NaN表示无) [1]
-            
+            % 经典紧耦合 EKF (ESKEF) 更新步 (仅处理 UWB 测距信息更新)
             I = obj.Vehicle_num;
             
-            % --- 1. 活跃 UWB 测距统计 ---
+            % 整理活跃 UWB 观测
             active_anc = [];   
             active_rel = [];   
-            
             for i = 1:I
                 for k = 1:size(anchors, 1)
                     if ~isnan(uwb_anc(i, k))
@@ -110,7 +98,7 @@ classdef ESKF < handle
             
             if M == 0, return; end
             
-            % 构造测量向量与 R 矩阵
+            % 构造测量向量与测量噪声 R_cov
             y_meas = [];
             R_list = [];
             for r = 1:M_anc
@@ -123,46 +111,39 @@ classdef ESKF < handle
             end
             R_cov = diag(R_list);
             
-            % --- 2. 在当前标称预测位置计算残差与 9I 维观测雅可比 [4] ---
+            % 计算残差与 9I 维观测雅可比
             h_val = zeros(M, 1);
-            H_jac = zeros(M, 9*I); % 联合误差状态雅可比
+            H_jac = zeros(M, 9*I); 
             
             row_ptr = 1;
-            
             % A. 基站测距雅可比 (仅关于位置误差 \delta p) [5]
             for r = 1:M_anc
                 i = active_anc(r, 1); k = active_anc(r, 2);
                 p_i = obj.states(i).p;
                 c_k = anchors(k, :)';
-                
                 dist = norm(p_i - c_k);
                 if dist < 1e-6, dist = 1e-6; end
                 h_val(row_ptr) = dist;
-                
-                u_dir = (p_i - c_k)' / dist;
-                H_jac(row_ptr, (i-1)*9 + (1:3)) = u_dir; % wrt \delta p_i
+                H_jac(row_ptr, (i-1)*9 + (1:3)) = (p_i - c_k)' / dist;
                 row_ptr = row_ptr + 1;
             end
-            
             % B. 车间测距雅可比 (关于 \delta p_i 和 \delta p_j) [5]
             for r = 1:M_rel
                 i = active_rel(r, 1); j = active_rel(r, 2);
                 p_i = obj.states(i).p;
                 p_j = obj.states(j).p;
-                
                 dist = norm(p_i - p_j);
                 if dist < 1e-6, dist = 1e-6; end
                 h_val(row_ptr) = dist;
-                
                 u_dir = (p_i - p_j)' / dist;
-                H_jac(row_ptr, (i-1)*9 + (1:3)) =  u_dir; % wrt \delta p_i
-                H_jac(row_ptr, (j-1)*9 + (1:3)) = -u_dir; % wrt \delta p_j
+                H_jac(row_ptr, (i-1)*9 + (1:3)) =  u_dir;
+                H_jac(row_ptr, (j-1)*9 + (1:3)) = -u_dir;
                 row_ptr = row_ptr + 1;
             end
             
             y_err = y_meas - h_val;
             
-            % --- 3. 标准卡尔曼形式更新 ---
+            % 标准卡尔曼形式更新
             S = H_jac * obj.P * H_jac' + R_cov;
             K = (obj.P * H_jac') / S;
             
@@ -173,11 +154,9 @@ classdef ESKF < handle
             obj.P = (eye(9*I) - K * H_jac) * obj.P;
             obj.P = 0.5 * (obj.P + obj.P');
             
-            % --- 4. 标称状态 9维 流形回馈纠正 [7] ---
+            % 标称状态 9维 流形回馈纠正 [7]
             for i = 1:I
                 dx_i = dx((i-1)*9 + (1:9));
-                
-                % 对 9 维经典状态进行直和反馈修正
                 obj.states(i).p = obj.states(i).p + dx_i(1:3);
                 obj.states(i).v = obj.states(i).v + dx_i(4:6);
                 obj.states(i).R = obj.states(i).R * so3_exp(dx_i(7:9));

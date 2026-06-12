@@ -74,7 +74,7 @@ classdef CMLKF < handle
                 A_joint(row_idx, row_idx) = A_i;
             end
             
-            obj.P = A_joint * obj.P * A_joint' + obj.Q_joint * dt;
+            obj.P = A_joint * obj.P * A_joint' + obj.Q_joint ;
             obj.P = 0.5 * (obj.P + obj.P'); 
         end
         
