@@ -318,7 +318,7 @@ classdef CMLKF < handle
                 chi_opt(i).omega = obj.states(i).omega;
             end
             
-            max_iter = 5;
+            max_iter = 2;
             tol = 1e-4;
             
             for iter = 1:max_iter
