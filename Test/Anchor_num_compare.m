@@ -27,7 +27,7 @@ for idx_anc = 1:N_anc_tests
     fprintf('\n>>> 当前评测数据集基站数量: %d <<<\n', anc_num);
     
     % A. 自动检测并加载数据集
-    data_file = sprintf('E:\\SE3_MLKF\\Data\\Trj_data_Veh4_Anc%d_3D_1.mat', anc_num);
+    data_file = sprintf('E:\\SE3_MLKF\\Data\\Trj_data_Veh4_Anc%d_3D.mat', anc_num);
     if ~exist(data_file, 'file')
         data_file = sprintf('../Data/Trj_data_Veh4_Anc%d_3D.mat', anc_num); 
         if ~exist(data_file, 'file')
