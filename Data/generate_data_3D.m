@@ -12,7 +12,7 @@ dt_uwb = 0.1;               % UWB 采样时间 10Hz (0.1s)
 t_end = 300;                % 运行时间 300秒
 N_steps = round(t_end / dt_imu) + 1; % 30001 个采样点
 Vehicle_num = 4;            % 车辆数量
-Anchor_num = 7;             % 基站数量
+Anchor_num = 9;             % 基站数量
 
 % 基站高度在 0~8m 范围内实现非对称立体最大化错落
 
@@ -38,13 +38,13 @@ Anchor_num = 7;             % 基站数量
 %             0, 40, 7.5];    % 角落 4：中高位
 
 % 7基站
-anchors = [ 0,  0, 0;     % 角落 1：极低位
-            0,  0, 7.5;
-           20,  0, 7.5;     % 角落 2：极高位
-           20, 40, 7.5;
-           20, 40, 0;
-            0, 40, 0;
-            0, 40, 7.5];    % 角落 4：中高位
+% anchors = [ 0,  0, 0;     % 角落 1：极低位
+%             0,  0, 7.5;
+%            20,  0, 7.5;     % 角落 2：极高位
+%            20, 40, 7.5;
+%            20, 40, 0;
+%             0, 40, 0;
+%             0, 40, 7.5];    % 角落 4：中高位
 
 % 8基站
 % anchors = [ 0,  0, 0;     % 角落 1：极低位
@@ -56,9 +56,20 @@ anchors = [ 0,  0, 0;     % 角落 1：极低位
 %             0, 40, 0;
 %             0, 40, 7.5];    % 角落 4：中高位
 
+% 9基站
+anchors = [ 0,  0, 0;     % 角落 1：极低位
+            0,  0, 7.5;
+           20,  0, 0;
+           20,  0, 7.5;     % 角落 2：极高位
+           20, 40, 7.5;
+           20, 40, 0;     % 角落 3：中低位
+            0, 40, 0;
+            0, 40, 7.5;
+            0, 20, 0;];    % 角落 4：中高位
+
 % 保存路径
 save_dir = 'E:\SE3_MLKF\Data'; 
-trajectories_mat_name = sprintf('Trj_data_Veh%d_Anc%d_3D_1.mat', Vehicle_num, Anchor_num);
+trajectories_mat_name = sprintf('Trj_data_Veh%d_Anc%d_3D.mat', Vehicle_num, Anchor_num);
    
 % 噪声参数
 IMU_noise_params.sigma_na = 0.03;      
