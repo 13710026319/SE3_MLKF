@@ -91,18 +91,23 @@ init_P_9d = kron(eye(Vehicle_num), P_n_init_9d);
 % C. 实例化两个滤波器类
 filter_cmlkf = CMLKF(init_states_15d, init_P_15d, Q_sigmas_15d);
 filter_ekf   = EKF(init_states_9d, init_P_9d); 
+filter_iekf  = IEKF(init_states_9d, init_P_9d);
 
 %% 4. 执行多滤波器并行仿真循环
 pos_est_cmlkf = cell(Vehicle_num, 1);
 pos_est_ekf   = cell(Vehicle_num, 1);
+pos_est_iekf  = cell(Vehicle_num, 1);
 for n = 1:Vehicle_num
     pos_est_cmlkf{n} = zeros(N_steps, 3);
     pos_est_ekf{n}   = zeros(N_steps, 3);
+    pos_est_iekf{n}   = zeros(N_steps, 3);
+
     pos_est_cmlkf{n}(1, :) = init_states_15d(n).p';
     pos_est_ekf{n}(1, :)   = init_states_9d(n).p';
+    pos_est_iekf{n}(1, :)   = init_states_9d(n).p';
 end
 
-fprintf('开始执行 CMLKF 与 EKF 协同估计运行...\n');
+fprintf('开始运行\n');
 tic;
 for k = 2:N_steps
     % 提取当前 IMU 真实零偏并预校正 [1]
@@ -120,7 +125,8 @@ for k = 2:N_steps
     % A. 预测步：状态时间传播
     filter_cmlkf.propagate(dt_imu);
     filter_ekf.propagate(imu_acc, imu_gyro, dt_imu); % EKF 9D 以 IMU 作为控制输入 [1.2.9]
-    
+    filter_iekf.propagate(imu_acc, imu_gyro, dt_imu);
+
     % B. 观测更新步 [8]
     if mod(k - 1, 10) == 0
         % --- UWB测距联合更新周期 (10Hz) ---
@@ -143,6 +149,10 @@ for k = 2:N_steps
         % EKF (9D)：IMU作为输入，观测步仅依靠 UWB 更新 [1.1.5, 1.2.9]
         filter_ekf.update(anchors, anc_meas, rel_meas, ...
                           UWB_noise_params.sigma_anc, UWB_noise_params.sigma_rel);
+
+        % IEKF (9D)：同步进行迭代卡尔曼更新
+        filter_iekf.update(anchors, anc_meas, rel_meas, ...
+                           UWB_noise_params.sigma_anc, UWB_noise_params.sigma_rel);
     else
         % --- 高频 IMU-only 最大似然更新步 (其余 90Hz 步) ---
         filter_cmlkf.update_imu_only(imu_acc, imu_gyro, ...
@@ -153,6 +163,7 @@ for k = 2:N_steps
     for n = 1:Vehicle_num
         pos_est_cmlkf{n}(k, :) = filter_cmlkf.states(n).p';
         pos_est_ekf{n}(k, :)   = filter_ekf.states(n).p';
+        pos_est_iekf{n}(k, :)   = filter_iekf.states(n).p';
     end
 end
 toc;
@@ -169,6 +180,7 @@ end
 
 [errors_cmlkf, rmse_cmlkf] = calculate_position_errors(pos_est_cmlkf, pos_true);
 [errors_ekf, rmse_ekf]     = calculate_position_errors(pos_est_ekf, pos_true);
+[errors_iekf, rmse_iekf]   = calculate_position_errors(pos_est_iekf, pos_true);
 
 % 组装比较表 [2]
 RowNames = cell(Vehicle_num * 2, 1);
@@ -179,24 +191,31 @@ Euc_RMSE = zeros(Vehicle_num * 2, 1);
 
 for n = 1:Vehicle_num
     % 1. EKF (9D)
-    idx_ekf = 2*n - 1;
-    RowNames{idx_ekf} = sprintf('V%d_EKF_9D(IMU_Input)', n);
+    idx_ekf = 3*n - 2;
+    RowNames{idx_ekf} = sprintf('V%d_EKF', n);
     X_RMSE(idx_ekf)   = rmse_ekf(n).axis_rmse(1);
     Y_RMSE(idx_ekf)   = rmse_ekf(n).axis_rmse(2);
     Z_RMSE(idx_ekf)   = rmse_ekf(n).axis_rmse(3);
     Euc_RMSE(idx_ekf) = rmse_ekf(n).euc_rmse;
     
-    % 2. CMLKF (15D，重构优化版)
-    idx_new_ml = 2*n;
-    RowNames{idx_new_ml}   = sprintf('V%d_CMLKF_15D(IMU_Obs_100Hz_MLKF)', n);
-    X_RMSE(idx_new_ml)     = rmse_cmlkf(n).axis_rmse(1);
-    Y_RMSE(idx_new_ml)     = rmse_cmlkf(n).axis_rmse(2);
-    Z_RMSE(idx_new_ml)     = rmse_cmlkf(n).axis_rmse(3);
-    Euc_RMSE(idx_new_ml)   = rmse_cmlkf(n).euc_rmse;
+    % 2. IEKF (9D, 新增迭代版)
+    idx_iekf = 3*n - 1;
+    RowNames{idx_iekf} = sprintf('V%d_IEKF', n);
+    X_RMSE(idx_iekf)   = rmse_iekf(n).axis_rmse(1);
+    Y_RMSE(idx_iekf)   = rmse_iekf(n).axis_rmse(2);
+    Z_RMSE(idx_iekf)   = rmse_iekf(n).axis_rmse(3);
+    Euc_RMSE(idx_iekf) = rmse_iekf(n).euc_rmse;
+    
+    % 3. CMLKF (15D, 流形高频MLKF版)
+    idx_cmlkf = 3*n;
+    RowNames{idx_cmlkf}   = sprintf('V%d_CMLKF', n);
+    X_RMSE(idx_cmlkf)     = rmse_cmlkf(n).axis_rmse(1);
+    Y_RMSE(idx_cmlkf)     = rmse_cmlkf(n).axis_rmse(2);
+    Z_RMSE(idx_cmlkf)     = rmse_cmlkf(n).axis_rmse(3);
+    Euc_RMSE(idx_cmlkf)   = rmse_cmlkf(n).euc_rmse;
 end
 
 rmse_comparison_table = table(X_RMSE, Y_RMSE, Z_RMSE, Euc_RMSE, 'RowNames', RowNames);
-fprintf('\n========================== CMLKF (流形高频版) VS EKF (离散噪声版) 性能评估对比表 ==========================\n');
 disp(rmse_comparison_table);
 fprintf('===================================================================================================\n');
 
@@ -212,7 +231,8 @@ for n = 1:Vehicle_num
     plot(time_arr, errors_ekf(n).euc_err, 'b-', 'LineWidth', 1.2, 'DisplayName', 'Centralized EKF (9D, IMU as Input)');
     % 2. 优化版 CMLKF (红色虚线 - 现已应用100Hz最大似然流形优化更新 + J_t=I) [4, 7]
     plot(time_arr, errors_cmlkf(n).euc_err, 'r--', 'LineWidth', 1.5, 'DisplayName', 'Centralized MLKF (15D, MLKF-IMU, 100Hz, J_t=I)');
-    
+    % 3. 经典 9维 IEKF (绿色点划线)
+    plot(time_arr, errors_iekf(n).euc_err, 'g-.', 'LineWidth', 1.2, 'DisplayName', 'Centralized IEKF (9D, Iterative)');
     title(sprintf('Vehicle %d Euclidean Error Comparison', n));
     xlabel('Time (s)'); ylabel('Error (m)');
     xlim([0, time_arr(end)]);

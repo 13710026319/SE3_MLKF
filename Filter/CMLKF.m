@@ -149,7 +149,7 @@ classdef CMLKF < handle
                 chi_opt(i).omega = obj.states(i).omega;
             end
             
-            max_iter = 5;
+            max_iter = 5; % 目前UWB+IMU的需要迭代，而IMU_only的可以置为1
             tol = 1e-4;
             
             for iter = 1:max_iter
@@ -318,7 +318,7 @@ classdef CMLKF < handle
                 chi_opt(i).omega = obj.states(i).omega;
             end
             
-            max_iter = 2;
+            max_iter = 1;
             tol = 1e-4;
             
             for iter = 1:max_iter
