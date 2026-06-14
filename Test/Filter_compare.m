@@ -167,7 +167,7 @@ for k = 2:N_steps
     end
 end
 toc;
-fprintf('双算法仿真对比计算完毕。\n');
+fprintf('计算完毕。\n');
 
 %% 5. 位置误差计算与控制台表格联合输出
 pos_true = cell(Vehicle_num, 1);
