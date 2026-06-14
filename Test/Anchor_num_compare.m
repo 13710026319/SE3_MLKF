@@ -11,7 +11,7 @@ addpath(genpath('../Common'));
 addpath(genpath('../Filter'));
 addpath(genpath('../Data'));
 
-Anc_list = 4:5;                % 评测的基站数量范围
+Anc_list = 4:6;                % 评测的基站数量范围
 N_anc_tests = length(Anc_list);
 
 % 记录各个基站数量下，全车平均欧氏定位误差的数组
